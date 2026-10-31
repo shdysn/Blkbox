@@ -60,7 +60,7 @@ jobs:
 
       - name: Assemble Debug APK
         run: |
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache --stacktrace
 
       - name: Verify Debug APK Output
         run: |
@@ -82,7 +82,7 @@ jobs:
       - name: Assemble Release APK
         continue-on-error: true
         run: |
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace || echo "Release build requires keystore configuration"
+          ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache --stacktrace || echo "Release build requires keystore configuration"
 
       - name: Upload Release APK Artifact (if available)
         uses: actions/upload-artifact@v4
@@ -95,4 +95,4 @@ jobs:
       - name: Run Unit Tests
         continue-on-error: true
         run: |
-          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+          ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache --stacktrace
