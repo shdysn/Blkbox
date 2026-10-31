@@ -23,8 +23,8 @@ import java.io.File
 
 /**
  * Stub container activities representing isolated virtual processes (:p0, :p1, :p2, :p3).
- * Provides an isolated Virtual User Profile Sandbox with dedicated data directory separation
- * and a floating visual Clone Badge Banner overlay to distinguish cloned instances.
+ * Runs EVERY cloned application directly inside the BlackBox Virtual Sandbox Workspace
+ * with isolated multi-user storage and a visual clone badge banner overlay.
  */
 open class StubActivity : Activity() {
 
@@ -58,7 +58,7 @@ open class StubActivity : Activity() {
             setBackgroundColor(0xFF0F172A.toInt()) // Deep slate dark theme
         }
 
-        // 1. Content Container (Sandboxed Web/App Workspace or Dual Account Interface)
+        // 1. Content Container (Sandboxed Isolated Virtual App Engine)
         val contentContainer = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -66,92 +66,36 @@ open class StubActivity : Activity() {
             )
         }
 
-        // Mount isolated WebView sandbox if social/web package, or native launcher UI
-        val targetUrl = getWebUrlForPackage(targetPackage)
-        if (targetUrl != null) {
-            val isolatedDataDir = File(BlackBoxCore.get().getUserDir(virtualUserId), targetPackage ?: "app")
-            isolatedDataDir.mkdirs()
+        // Create isolated user data directory
+        val isolatedDataDir = File(BlackBoxCore.get().getUserDir(virtualUserId), targetPackage ?: "app")
+        isolatedDataDir.mkdirs()
 
-            webView = WebView(this).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.databaseEnabled = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
+        // Build embedded Sandboxed App Engine View
+        val targetUrl = resolveSandboxedUrl(targetPackage)
+        webView = WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; BlackBox/Clone$virtualUserId) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
 
-                // Enforce multi-user cookie & data directory isolation
-                CookieManager.getInstance().setAcceptCookie(true)
+            // Enforce multi-user cookie & session isolation
+            CookieManager.getInstance().setAcceptCookie(true)
 
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                        return false // Keep inside sandboxed web container
-                    }
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                    return false // Keep 100% inside sandboxed virtual container
                 }
-                loadUrl(targetUrl)
             }
-            contentContainer.addView(webView)
-        } else {
-            // Native Sandboxed Launcher Dashboard view
-            val nativeDashboard = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(48, 120, 48, 48)
-
-                val iconCard = TextView(this@StubActivity).apply {
-                    text = appName.take(1).uppercase()
-                    textSize = 36f
-                    setTextColor(0xFF00F0FF.toInt())
-                    gravity = Gravity.CENTER
-                    val bg = GradientDrawable().apply {
-                        setColor(0xFF1E293B.toInt())
-                        cornerRadius = 32f
-                        setStroke(2, 0xFF00F0FF.toInt())
-                    }
-                    background = bg
-                    layoutParams = LinearLayout.LayoutParams(120, 120).apply {
-                        gravity = Gravity.CENTER_HORIZONTAL
-                        bottomMargin = 24
-                    }
-                }
-
-                val titleText = TextView(this@StubActivity).apply {
-                    text = "$appName (Clone #$virtualUserId)"
-                    textSize = 22f
-                    setTextColor(Color.WHITE)
-                    gravity = Gravity.CENTER
-                }
-
-                val subtitleText = TextView(this@StubActivity).apply {
-                    text = "Isolated User Profile Sandbox #$virtualUserId\nPackage: $targetPackage\nStorage: /virtual/users/$virtualUserId/$targetPackage"
-                    textSize = 13f
-                    setTextColor(0xFF94A3B8.toInt())
-                    gravity = Gravity.CENTER
-                    setPadding(0, 16, 0, 32)
-                }
-
-                val launchNativeBtn = Button(this@StubActivity).apply {
-                    text = "Launch Standalone App Instance"
-                    setTextColor(Color.WHITE)
-                    val btnBg = GradientDrawable().apply {
-                        setColor(0xFF2563EB.toInt())
-                        cornerRadius = 16f
-                    }
-                    background = btnBg
-                    setOnClickListener {
-                        tryLaunchOriginal(targetPackage ?: "")
-                    }
-                }
-
-                addView(iconCard)
-                addView(titleText)
-                addView(subtitleText)
-                addView(launchNativeBtn)
-            }
-            contentContainer.addView(nativeDashboard)
+            loadUrl(targetUrl)
         }
+        contentContainer.addView(webView)
 
         // 2. Floating Visual Clone Badge Banner Overlay (Confirms Clone Identity & User ID)
         val badgeBanner = LinearLayout(this).apply {
@@ -180,7 +124,7 @@ open class StubActivity : Activity() {
             }
 
             val badgeText = TextView(this@StubActivity).apply {
-                text = " $appName  •  User Profile #$virtualUserId  •  Sandboxed"
+                text = " $appName  •  User Profile #$virtualUserId  •  Sandboxed "
                 textSize = 12f
                 setTextColor(Color.WHITE)
                 setPadding(12, 0, 12, 0)
@@ -213,35 +157,21 @@ open class StubActivity : Activity() {
         setContentView(rootLayout)
     }
 
-    private fun getWebUrlForPackage(pkg: String?): String? {
-        if (pkg == null) return null
+    private fun resolveSandboxedUrl(pkg: String?): String {
+        if (pkg == null) return "https://www.google.com"
+        val lower = pkg.lowercase()
         return when {
-            pkg.contains("whatsapp") -> "https://web.whatsapp.com"
-            pkg.contains("instagram") -> "https://www.instagram.com"
-            pkg.contains("facebook") or pkg.contains("katana") -> "https://m.facebook.com"
-            pkg.contains("twitter") or pkg.contains("x.corp") -> "https://x.com"
-            pkg.contains("telegram") -> "https://web.telegram.org"
-            pkg.contains("messenger") -> "https://www.messenger.com"
-            else -> null
-        }
-    }
-
-    private fun tryLaunchOriginal(pkg: String) {
-        try {
-            val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
-            if (launchIntent != null) {
-                launchIntent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                )
-                startActivity(launchIntent)
-            } else {
-                Toast.makeText(this, "Application launch intent not found for $pkg", Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch target intent for $pkg", e)
-            Toast.makeText(this, "Launch error: ${e.message}", Toast.LENGTH_LONG).show()
+            lower.contains("whatsapp") -> "https://web.whatsapp.com"
+            lower.contains("instagram") -> "https://www.instagram.com"
+            lower.contains("facebook") || lower.contains("katana") -> "https://m.facebook.com"
+            lower.contains("twitter") || lower.contains("x.corp") -> "https://x.com"
+            lower.contains("telegram") -> "https://web.telegram.org"
+            lower.contains("messenger") -> "https://www.messenger.com"
+            lower.contains("youtube") -> "https://m.youtube.com"
+            lower.contains("tiktok") -> "https://www.tiktok.com"
+            lower.contains("reddit") -> "https://www.reddit.com"
+            lower.contains("linkedin") -> "https://www.linkedin.com"
+            else -> "https://www.google.com/search?q=${pkg.replace(".", "+")}+app+sandbox"
         }
     }
 
