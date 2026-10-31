@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build & Test Android APK
+    name: Build & Test Android APK (Python Self-Healing)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,16 +27,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Restore Debug Keystore
-        run: |
-          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            echo "Restoring debug.keystore from debug.keystore.base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
-          fi
-          if [ -f debug.keystore ]; then
-            echo "debug.keystore successfully verified:"
-            ls -lh debug.keystore
-          fi
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -44,7 +38,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Configure Android SDK & Self-Healing Pre-fetch
+      - name: Configure Android SDK & Accept Licenses
         run: |
           SDK_PATH="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$SDK_PATH" >> $GITHUB_ENV
@@ -52,30 +46,18 @@ jobs:
           
           SDKMANAGER="$SDK_PATH/cmdline-tools/latest/bin/sdkmanager"
           if [ -f "$SDKMANAGER" ]; then
-            echo "Accepting all Android SDK licenses..."
             yes | "$SDKMANAGER" --licenses 2>/dev/null || true
-            echo "Pre-installing required Android SDK platforms & build tools..."
             "$SDKMANAGER" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "platform-tools" 2>/dev/null || true
           fi
 
-      - name: Ensure Gradle Wrapper is Executable & Clean Locks
+      - name: Ensure Gradle Wrapper & Scripts Executable
         run: |
           chmod +x gradlew
-          echo "Clearing any stale Gradle locks or daemon caches..."
-          rm -rf ~/.gradle/caches/journal-1 ~/.gradle/caches/locks ~/.gradle/daemon || true
+          chmod +x .github/scripts/self_repair.py
 
-      - name: Assemble Debug APK (Self-Healing Auto-Retry)
+      - name: Assemble Debug APK (Python Intelligent Self-Repair)
         run: |
-          echo "=== Attempt 1: Assembling Debug APK ==="
-          if ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache --stacktrace; then
-            echo "Debug APK assembled successfully on first attempt!"
-          else
-            echo "::warning::First build attempt failed. Initiating automatic self-healing recovery..."
-            ./gradlew --stop || true
-            rm -rf ~/.gradle/caches/journal-1 ~/.gradle/caches/locks ~/.gradle/daemon app/build .gradle || true
-            echo "=== Attempt 2: Rebuilding Debug APK after clean recovery ==="
-            ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache --stacktrace
-          fi
+          python .github/scripts/self_repair.py :app:assembleDebug
 
       - name: Verify Debug APK Output
         run: |
@@ -94,15 +76,10 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
 
-      - name: Assemble Release APK (Self-Healing)
+      - name: Assemble Release APK (Python Self-Repair)
         continue-on-error: true
         run: |
-          echo "=== Assembling Release APK ==="
-          ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache --stacktrace || {
-            echo "::warning::Release build failed on first try. Cleaning and retrying..."
-            ./gradlew --stop || true
-            ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache --stacktrace || echo "Release build requires keystore configuration"
-          }
+          python .github/scripts/self_repair.py :app:assembleRelease
 
       - name: Upload Release APK Artifact (if available)
         uses: actions/upload-artifact@v4
@@ -112,11 +89,7 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
 
-      - name: Run Unit Tests (Self-Healing)
+      - name: Run Unit Tests (Python Self-Repair)
         continue-on-error: true
         run: |
-          echo "=== Running Unit Tests ==="
-          ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache --stacktrace || {
-            echo "::warning::Unit tests failed on first try. Retrying..."
-            ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache --stacktrace || true
-          }
+          python .github/scripts/self_repair.py :app:testDebugUnitTest
