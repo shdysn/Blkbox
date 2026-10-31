@@ -18,13 +18,18 @@ def restore_environment():
     # 1. Restore debug.keystore if missing
     base64_file = Path("debug.keystore.base64")
     target_keystore = Path("debug.keystore")
-    if base64_file.exists() and not target_keystore.exists():
-        log("Restoring missing debug.keystore from debug.keystore.base64...")
+    if not target_keystore.exists():
+        log("Restoring debug.keystore...")
         try:
             import base64
-            data = base64.b64decode(base64_file.read_text().strip())
-            target_keystore.write_bytes(data)
-            log("debug.keystore successfully restored.")
+            if base64_file.exists():
+                data = base64.b64decode(base64_file.read_text().strip())
+                target_keystore.write_bytes(data)
+                log("debug.keystore successfully restored from base64.")
+            elif os.environ.get("DEBUG_KEYSTORE_BASE64"):
+                data = base64.b64decode(os.environ["DEBUG_KEYSTORE_BASE64"].strip())
+                target_keystore.write_bytes(data)
+                log("debug.keystore successfully restored from environment variable.")
         except Exception as e:
             log(f"Warning: Keystore restore failed: {e}")
 
@@ -48,7 +53,7 @@ def fix_gradle_properties():
         
         for i, line in enumerate(lines):
             if line.startswith("org.gradle.jvmargs="):
-                lines[i] = "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8 -Djava.awt.headless=true"
+                lines[i] = "org.gradle.jvmargs=-Xmx2048m"
                 modified = True
             elif line.startswith("org.gradle.caching="):
                 if "false" not in line:
@@ -114,7 +119,7 @@ def self_repair_build(target_task):
     restore_environment()
     fix_gradle_properties()
     
-    cmd = ["./gradlew", target_task, "--no-daemon", "--no-configuration-cache", "--no-build-cache", "--stacktrace"]
+    cmd = ["./gradlew"] + (target_task.split() if isinstance(target_task, str) else list(target_task)) + ["--no-daemon", "--no-configuration-cache"]
     
     # First attempt with live log streaming
     success = run_cmd_live(cmd)
@@ -141,6 +146,6 @@ def self_repair_build(target_task):
         return 1
 
 if __name__ == "__main__":
-    task = sys.argv[1] if len(sys.argv) > 1 else ":app:assembleDebug"
+    task = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "assembleDebug"
     exit_code = self_repair_build(task)
     sys.exit(exit_code)

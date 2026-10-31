@@ -57,7 +57,7 @@ jobs:
 
       - name: Assemble Debug APK (Python Intelligent Self-Repair)
         run: |
-          python .github/scripts/self_repair.py :app:assembleDebug
+          python .github/scripts/self_repair.py assembleDebug
 
       - name: Verify Debug APK Output
         run: |
