@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Self-Repair Script for Android Gradle Builds in GitHub Actions.
-Inspects build environment, restores credentials, repairs properties,
-cleans corrupted caches, and executes Gradle build with intelligent fallback.
+Performs live-streamed build execution, env/keystore restoration,
+gradle.properties hardening, and automated recovery on failure.
 """
 
 import os
@@ -14,18 +14,30 @@ from pathlib import Path
 def log(msg):
     print(f"[Self-Repair] {msg}", flush=True)
 
-def restore_keystore():
+def restore_environment():
+    # 1. Restore debug.keystore if missing
     base64_file = Path("debug.keystore.base64")
-    target_file = Path("debug.keystore")
-    if base64_file.exists() and not target_file.exists():
+    target_keystore = Path("debug.keystore")
+    if base64_file.exists() and not target_keystore.exists():
         log("Restoring missing debug.keystore from debug.keystore.base64...")
         try:
             import base64
             data = base64.b64decode(base64_file.read_text().strip())
-            target_file.write_bytes(data)
+            target_keystore.write_bytes(data)
             log("debug.keystore successfully restored.")
         except Exception as e:
             log(f"Warning: Keystore restore failed: {e}")
+
+    # 2. Restore .env file if missing (required by secrets gradle plugin)
+    env_file = Path(".env")
+    env_example = Path(".env.example")
+    if not env_file.exists():
+        if env_example.exists():
+            log("Creating .env from .env.example...")
+            shutil.copy(env_example, env_file)
+        else:
+            log("Creating default .env placeholder...")
+            env_file.write_text("# Placeholder .env\n")
 
 def fix_gradle_properties():
     props_file = Path("gradle.properties")
@@ -47,9 +59,13 @@ def fix_gradle_properties():
                 if "false" not in line:
                     lines[i] = "org.gradle.configuration-cache=false"
                     modified = True
+            elif line.startswith("org.gradle.parallel="):
+                if "false" not in line:
+                    lines[i] = "org.gradle.parallel=false"
+                    modified = True
 
         if modified:
-            log("Updated gradle.properties with headless JVM flags and caching disabled.")
+            log("Hardened gradle.properties (disabled parallel & caching, enabled headless).")
             props_file.write_text("\n".join(lines) + "\n")
 
 def clean_stale_caches():
@@ -73,37 +89,46 @@ def clean_stale_caches():
             except Exception as e:
                 log(f"Cache clean note ({path}): {e}")
 
-def run_cmd(cmd, check=False):
-    log(f"Running command: {' '.join(cmd)}")
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    print(res.stdout, flush=True)
-    return res.returncode == 0
+def run_cmd_live(cmd):
+    log(f"Executing: {' '.join(cmd)}")
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='', flush=True)
+    process.stdout.close()
+    return_code = process.wait()
+    return return_code == 0
 
 def self_repair_build(target_task):
     log(f"Starting self-healing execution for task: {target_task}")
     
-    # Pre-build fixes
-    restore_keystore()
+    # Pre-build environment preparation
+    restore_environment()
     fix_gradle_properties()
     
     cmd = ["./gradlew", target_task, "--no-daemon", "--no-configuration-cache", "--no-build-cache", "--stacktrace"]
     
-    # First attempt
-    success = run_cmd(cmd)
+    # First attempt with live log streaming
+    success = run_cmd_live(cmd)
     if success:
         log(f"Task {target_task} succeeded on Attempt 1!")
         return 0
 
     log(f"::warning::Attempt 1 for {target_task} failed. Executing self-repair sequence...")
     
-    # Self-repair actions
-    run_cmd(["./gradlew", "--stop"])
+    # Self-repair cleanup & re-verification
+    run_cmd_live(["./gradlew", "--stop"])
     clean_stale_caches()
-    restore_keystore()
+    restore_environment()
     fix_gradle_properties()
     
     log(f"Executing Attempt 2 after self-repair cleanup...")
-    success = run_cmd(cmd)
+    success = run_cmd_live(cmd)
     
     if success:
         log(f"Task {target_task} succeeded on Attempt 2 after self-repair!")
