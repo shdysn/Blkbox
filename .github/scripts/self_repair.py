@@ -31,31 +31,32 @@ def fix_gradle_properties():
     props_file = Path("gradle.properties")
     if props_file.exists():
         content = props_file.read_text()
-        required_flags = [
-            "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -Djava.awt.headless=true",
-            "org.gradle.parallel=true",
-            "kotlin.compiler.execution.strategy=in-process"
-        ]
-        modified = False
         lines = content.splitlines()
+        modified = False
         
-        # Ensure java.awt.headless=true is in org.gradle.jvmargs
         for i, line in enumerate(lines):
             if line.startswith("org.gradle.jvmargs="):
                 if "-Djava.awt.headless=true" not in line:
                     lines[i] = line + " -Djava.awt.headless=true"
                     modified = True
+            elif line.startswith("org.gradle.caching="):
+                if "false" not in line:
+                    lines[i] = "org.gradle.caching=false"
+                    modified = True
+            elif line.startswith("org.gradle.configuration-cache="):
+                if "false" not in line:
+                    lines[i] = "org.gradle.configuration-cache=false"
+                    modified = True
 
         if modified:
-            log("Updated gradle.properties with headless JVM flags.")
+            log("Updated gradle.properties with headless JVM flags and caching disabled.")
             props_file.write_text("\n".join(lines) + "\n")
 
 def clean_stale_caches():
     home = Path.home()
     gradle_user_home = home / ".gradle"
     stale_paths = [
-        gradle_user_home / "caches" / "journal-1",
-        gradle_user_home / "caches" / "locks",
+        gradle_user_home / "caches",
         gradle_user_home / "daemon",
         Path(".gradle"),
         Path("build"),
@@ -85,7 +86,7 @@ def self_repair_build(target_task):
     restore_keystore()
     fix_gradle_properties()
     
-    cmd = ["./gradlew", target_task, "--no-daemon", "--no-configuration-cache", "--stacktrace"]
+    cmd = ["./gradlew", target_task, "--no-daemon", "--no-configuration-cache", "--no-build-cache", "--stacktrace"]
     
     # First attempt
     success = run_cmd(cmd)
