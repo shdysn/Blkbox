@@ -253,6 +253,7 @@ class BlackBoxCore private constructor() {
                 putExtra(StubActivity.EXTRA_PKG, packageName)
                 putExtra(StubActivity.EXTRA_USER_ID, userId)
                 putExtra(StubActivity.EXTRA_TARGET_ACTIVITY, targetActivityName)
+                putExtra(StubActivity.EXTRA_APP_NAME, vPkg.appName)
             }
 
             context.startActivity(stubIntent)

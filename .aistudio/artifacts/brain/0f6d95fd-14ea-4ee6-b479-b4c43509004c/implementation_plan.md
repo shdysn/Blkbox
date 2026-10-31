@@ -1,77 +1,39 @@
-# Eliminate CI Build Failures & Optimize KSP Pipeline - Implementation Plan
+# Isolated Virtual User Profile Sandbox & Visual Clone Overlay - Implementation Plan
 
-Deep analysis of the Gradle `IdentifyStep` execution crash on GitHub Actions and implementation of targeted CI optimizations to guarantee 100% reliable APK generation.
+Detailed plan to ensure cloned applications launch inside an isolated virtual user sandbox with separate data directories, avoiding delegation to the primary main app instance, and displaying a distinct floating Badge Banner overlay.
 
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> **Confirmed Choices:**
-> - **Disable CI Configuration Cache**: Pass `--no-configuration-cache` on all GitHub Actions Gradle commands. Ephemeral CI runners run in fresh virtual machines where configuration cache entries cannot be reused across runs anyway, and attempting to serialize complex KSP task states triggers the observed `IdentifyStep` failure.
-> - **Remove Unused Moshi KSP Processor**: Remove `"ksp"(libs.moshi.kotlin.codegen)` from `app/build.gradle.kts`. The app uses Room for local database persistence and does not use Moshi JSON code generation. Removing this processor streamlines KSP symbol processing.
+## User Choices Confirmed
+- **Architecture**: Isolated Virtual User Profile Sandbox (Multi-User DataDir Separation).
+- **Visual Distinction**: Add a prominent floating Badge Banner overlay showing Clone Number, Custom Name, and User ID.
 
 ---
 
-## 1. Overview & Deep Error Analysis
+## 1. Core Sandbox & Virtualization Fixes
 
-- **Incident Analysis**: In the GitHub Actions run (`github.com/shdysn/Blkb`), `Assemble Debug APK` failed after 3 minutes 34 seconds at line 217, terminating with:
-  ```text
-  at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:44)
-  at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:31)
-  at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:68)
-  ...
-  Configuration cache entry stored.
-  BUILD FAILED in 3m 34s
-  ```
-- **Root Cause**:
-  1. `IdentifyStep` is Gradle's task identity and input hashing stage during Configuration Cache serialization. When KSP runs multiple symbol processors concurrently (`Room` + `Moshi`), attempting to serialize task state into the Configuration Cache on clean CI runners causes serialization exceptions and worker race conditions.
-  2. Because GitHub Actions spins up an ephemeral runner for each job, configuration cache entries stored at the end of a run are never reused. Enabling configuration cache on CI provides zero performance benefit while introducing serialization hazards.
+### A. Isolated Virtual User Profile Sandbox (`BlackBoxCore.kt` & `StubActivity.kt`)
+- Ensure `StubActivity` runs as the host container for the isolated virtual user process (`:p0`, `:p1`, `:p2`, `:p3` process isolation declared in `AndroidManifest.xml`).
+- Maintain isolated sandbox storage directories (`/virtual/users/{userId}/{packageName}`) for shared preferences, databases, caches, and files.
+- Prevent unisolated host `startActivity` calls that default back to the main app task stack by binding intent extras (`blackbox_extra_user_id`, `blackbox_extra_pkg`, `blackbox_extra_clone_id`).
+
+### B. Visual Clone Identity Badge Banner (`StubActivity.kt`)
+- Display an interactive floating **Badge Banner Overlay** at the top or bottom of the virtual container view.
+- Show details: `Clone #{cloneIndex}` | `User #{userId}` | `Sandboxed Storage: /virtual/users/{userId}`.
+- Provide quick container controls: **Clear Cache**, **Container Stats**, and **Switch Clone**.
 
 ---
 
-## 2. Technical Architecture & CI/CD Pipeline
+## 2. File Modification Steps
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   GitHub Actions Runner                │
-│                 (Headless Ubuntu 24.04)                │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│ 1. Restore Keystore & Configure JDK 17 / Android SDK   │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│ 2. Assemble Debug APK (Optimized Flags)                │
-│    - ./gradlew :app:assembleDebug                      │
-│      --no-daemon                                       │
-│      --no-configuration-cache                          │
-│      --stacktrace                                      │
-│    - Only active processor: androidx.room.compiler     │
-│    - Clean compilation with zero cache serialization   │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│ 3. Upload Debug APK Artifact (Guaranteed Success)      │
-│    - actions/upload-artifact@v4                        │
-│    - Path: app/build/outputs/apk/debug/*.apk           │
-└────────────────────────────────────────────────────────┘
-```
+1. **`app/src/main/java/com/example/blackbox/stub/StubActivity.kt`**:
+   - Add visual Badge Banner overlay with Clone Number, Custom Name, and User ID.
+   - Configure sandbox environment parameters for isolated data storage.
+2. **`app/src/main/java/com/example/blackbox/BlackBoxCore.kt`**:
+   - Enhance intent creation to pass `user_id` and `clone_index` flags.
+3. **`app/src/main/java/com/example/data/repository/CloneRepository.kt`**:
+   - Pass clone metadata (`customName`, `cloneIndex`, `userId`) during launch.
 
 ---
 
-## 3. Key Changes & Execution Steps
-
-### 1. Update Gradle Build File (`app/build.gradle.kts`)
-- Remove or comment out `"ksp"(libs.moshi.kotlin.codegen)` from dependencies.
-- Retain only `"ksp"(libs.androidx.room.compiler)` for Room database entities and DAOs.
-
-### 2. Update GitHub Actions Workflow (`.github/workflows/build-apk.yml`)
-- Update `Assemble Debug APK`, `Assemble Release APK`, and `Run Unit Tests` to include `--no-configuration-cache`.
-- Add explicit step summary reporting on failure.
-
-### 3. Local Verification
-- Execute `./gradlew :app:assembleDebug --no-configuration-cache` to verify that the build completes with zero errors.
-- Run `compile_applet` to ensure full platform alignment.
+## 3. Verification Plan
+- Execute `./gradlew :app:assembleDebug :app:testDebugUnitTest`.
+- Run `compile_applet`.
