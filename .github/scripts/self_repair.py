@@ -6,34 +6,87 @@ gradle.properties hardening, and automated recovery on failure.
 """
 
 import os
-import sys
-import subprocess
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+
 
 def log(msg):
     print(f"[Self-Repair] {msg}", flush=True)
 
-def restore_environment():
-    # 1. Restore debug.keystore if missing
-    base64_file = Path("debug.keystore.base64")
+
+def restore_debug_keystore():
+    """Restore or generate a valid debug keystore for CI builds."""
     target_keystore = Path("debug.keystore")
-    if not target_keystore.exists():
-        log("Restoring debug.keystore...")
+    if target_keystore.exists() and target_keystore.stat().st_size > 0:
+        log("debug.keystore already present.")
+        return
+
+    base64_file = Path("debug.keystore.base64")
+    if base64_file.exists():
+        log("Restoring debug.keystore from debug.keystore.base64...")
         try:
             import base64
-            if base64_file.exists():
-                data = base64.b64decode(base64_file.read_text().strip())
-                target_keystore.write_bytes(data)
-                log("debug.keystore successfully restored from base64.")
-            elif os.environ.get("DEBUG_KEYSTORE_BASE64"):
-                data = base64.b64decode(os.environ["DEBUG_KEYSTORE_BASE64"].strip())
-                target_keystore.write_bytes(data)
-                log("debug.keystore successfully restored from environment variable.")
-        except Exception as e:
-            log(f"Warning: Keystore restore failed: {e}")
 
-    # 2. Restore .env file if missing (required by secrets gradle plugin)
+            data = base64.b64decode(base64_file.read_text().strip())
+            target_keystore.write_bytes(data)
+            log("debug.keystore successfully restored from base64.")
+            return
+        except Exception as e:
+            log(f"Warning: Keystore restore from base64 failed: {e}")
+
+    env_value = os.environ.get("DEBUG_KEYSTORE_BASE64")
+    if env_value:
+        log("Restoring debug.keystore from DEBUG_KEYSTORE_BASE64...")
+        try:
+            import base64
+
+            data = base64.b64decode(env_value.strip())
+            target_keystore.write_bytes(data)
+            log("debug.keystore successfully restored from environment variable.")
+            return
+        except Exception as e:
+            log(f"Warning: Keystore restore from environment failed: {e}")
+
+    log("No debug.keystore found; generating a new one for CI.")
+    keytool = shutil.which("keytool")
+    if not keytool:
+        raise RuntimeError("keytool not found in PATH; cannot generate debug keystore.")
+
+    cmd = [
+        keytool,
+        "-genkeypair",
+        "-v",
+        "-keystore",
+        str(target_keystore),
+        "-storepass",
+        "android",
+        "-alias",
+        "androiddebugkey",
+        "-keypass",
+        "android",
+        "-keyalg",
+        "RSA",
+        "-keysize",
+        "2048",
+        "-validity",
+        "10000",
+        "-dname",
+        "CN=Android Debug,O=Android,C=US",
+    ]
+
+    completed = subprocess.run(cmd, capture_output=True, text=True)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip() or completed.stdout.strip() or "unknown keytool error"
+        raise RuntimeError(f"Failed to generate debug.keystore: {stderr}")
+
+    log("debug.keystore generated successfully.")
+
+
+def restore_environment():
+    restore_debug_keystore()
+
     env_file = Path(".env")
     env_example = Path(".env.example")
     if not env_file.exists():
@@ -44,13 +97,14 @@ def restore_environment():
             log("Creating default .env placeholder...")
             env_file.write_text("# Placeholder .env\n")
 
+
 def fix_gradle_properties():
     props_file = Path("gradle.properties")
     if props_file.exists():
         content = props_file.read_text()
         lines = content.splitlines()
         modified = False
-        
+
         for i, line in enumerate(lines):
             if line.startswith("org.gradle.jvmargs="):
                 lines[i] = "org.gradle.jvmargs=-Xmx2048m"
@@ -76,6 +130,7 @@ def fix_gradle_properties():
             log("Hardened gradle.properties (2GB max heap, disabled parallel & caching, enabled headless).")
             props_file.write_text("\n".join(lines) + "\n")
 
+
 def clean_stale_caches():
     home = Path.home()
     gradle_user_home = home / ".gradle"
@@ -84,7 +139,7 @@ def clean_stale_caches():
         gradle_user_home / "daemon",
         Path(".gradle"),
         Path("build"),
-        Path("app/build")
+        Path("app/build"),
     ]
     for path in stale_paths:
         if path.exists():
@@ -97,6 +152,7 @@ def clean_stale_caches():
             except Exception as e:
                 log(f"Cache clean note ({path}): {e}")
 
+
 def run_cmd_live(cmd):
     log(f"Executing: {' '.join(cmd)}")
     process = subprocess.Popen(
@@ -104,46 +160,45 @@ def run_cmd_live(cmd):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1
+        bufsize=1,
     )
-    for line in iter(process.stdout.readline, ''):
-        print(line, end='', flush=True)
+    for line in iter(process.stdout.readline, ""):
+        print(line, end="", flush=True)
     process.stdout.close()
     return_code = process.wait()
     return return_code == 0
 
+
 def self_repair_build(target_task):
     log(f"Starting self-healing execution for task: {target_task}")
-    
-    # Pre-build environment preparation
+
     restore_environment()
     fix_gradle_properties()
-    
+
     cmd = ["./gradlew"] + (target_task.split() if isinstance(target_task, str) else list(target_task)) + ["--no-daemon", "--no-configuration-cache"]
-    
-    # First attempt with live log streaming
+
     success = run_cmd_live(cmd)
     if success:
         log(f"Task {target_task} succeeded on Attempt 1!")
         return 0
 
     log(f"::warning::Attempt 1 for {target_task} failed. Executing self-repair sequence...")
-    
-    # Self-repair cleanup & re-verification
+
     run_cmd_live(["./gradlew", "--stop"])
     clean_stale_caches()
     restore_environment()
     fix_gradle_properties()
-    
+
     log(f"Executing Attempt 2 after self-repair cleanup...")
     success = run_cmd_live(cmd)
-    
+
     if success:
         log(f"Task {target_task} succeeded on Attempt 2 after self-repair!")
         return 0
-    else:
-        log(f"Task {target_task} failed after 2 attempts.")
-        return 1
+
+    log(f"Task {target_task} failed after 2 attempts.")
+    return 1
+
 
 if __name__ == "__main__":
     task = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "assembleDebug"
