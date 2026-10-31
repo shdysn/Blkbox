@@ -48,9 +48,8 @@ def fix_gradle_properties():
         
         for i, line in enumerate(lines):
             if line.startswith("org.gradle.jvmargs="):
-                if "-Djava.awt.headless=true" not in line:
-                    lines[i] = line + " -Djava.awt.headless=true"
-                    modified = True
+                lines[i] = "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8 -Djava.awt.headless=true"
+                modified = True
             elif line.startswith("org.gradle.caching="):
                 if "false" not in line:
                     lines[i] = "org.gradle.caching=false"
@@ -63,9 +62,13 @@ def fix_gradle_properties():
                 if "false" not in line:
                     lines[i] = "org.gradle.parallel=false"
                     modified = True
+            elif line.startswith("kotlin.compiler.execution.strategy="):
+                if "out-of-process" not in line:
+                    lines[i] = "kotlin.compiler.execution.strategy=out-of-process"
+                    modified = True
 
         if modified:
-            log("Hardened gradle.properties (disabled parallel & caching, enabled headless).")
+            log("Hardened gradle.properties (2GB max heap, disabled parallel & caching, enabled headless).")
             props_file.write_text("\n".join(lines) + "\n")
 
 def clean_stale_caches():
