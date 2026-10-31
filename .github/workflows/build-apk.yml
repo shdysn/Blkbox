@@ -30,30 +30,26 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Make Gradle Wrapper Executable
+      - name: Configure Android SDK & Accept Licenses
         run: |
-          if [ -f gradlew ]; then
-            chmod +x gradlew
+          SDK_PATH="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_PATH" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK_PATH" >> $GITHUB_ENV
+          if [ -d "$SDK_PATH/cmdline-tools/latest/bin" ]; then
+            yes | "$SDK_PATH/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
           fi
+
+      - name: Ensure Gradle Wrapper is Executable
+        run: |
+          chmod +x gradlew
 
       - name: Run Unit Tests
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
-          else
-            gradle :app:testDebugUnitTest --no-daemon --stacktrace
-          fi
+          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Assemble Debug APK
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug --no-daemon --stacktrace
-          fi
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify Debug APK Output
         run: |
@@ -72,14 +68,10 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
 
-      - name: Assemble Release APK (Unsigned/Configured)
+      - name: Assemble Release APK
         continue-on-error: true
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew :app:assembleRelease --no-daemon --stacktrace || echo "Release build requires keystore configuration"
-          else
-            gradle :app:assembleRelease --no-daemon --stacktrace || echo "Release build requires keystore configuration"
-          fi
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace || echo "Release build requires keystore configuration"
 
       - name: Upload Release APK Artifact (if available)
         uses: actions/upload-artifact@v4
