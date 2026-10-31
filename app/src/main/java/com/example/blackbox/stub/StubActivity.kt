@@ -85,18 +85,33 @@ open class StubActivity : Activity() {
         root.addView(container)
         setContentView(root)
 
-        // Attempt direct launch if original component is directly dispatchable or invoke host launcher
+        // Launch original application with smooth splash transition
         targetPackage?.let { pkg ->
-            tryLaunchOriginal(pkg)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                tryLaunchOriginal(pkg)
+            }, 800)
         }
     }
 
     private fun tryLaunchOriginal(pkg: String) {
-        val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
-        if (launchIntent != null) {
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-            // In a full root/hooked environment, Binder hooks redirect IPC calls here.
-            // When falling back in standard Android container, we maintain state isolation.
+        try {
+            val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+            if (launchIntent != null) {
+                launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
+                startActivity(launchIntent)
+                finish()
+            } else {
+                android.widget.Toast.makeText(this, "Application launch intent not found for $pkg", android.widget.Toast.LENGTH_LONG).show()
+                finish()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch target intent for $pkg", e)
+            android.widget.Toast.makeText(this, "Launch error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            finish()
         }
     }
 
