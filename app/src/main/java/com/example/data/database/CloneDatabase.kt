@@ -34,7 +34,7 @@ abstract class CloneDatabase : RoomDatabase() {
                     context.applicationContext,
                     CloneDatabase::class.java,
                     "app_cloner.db"
-                ).fallbackToDestructiveMigration().build().also {
+                ).fallbackToDestructiveMigration(true).build().also {
                     INSTANCE = it
                 }
             }
